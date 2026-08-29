@@ -21,6 +21,8 @@ export {
   markSent,
   markFailed,
   resetForRetry,
+  getReconcilable,
+  resetStalledSends,
   type CreateCampaignInput,
   type EmailRow,
 } from './emails.js';
