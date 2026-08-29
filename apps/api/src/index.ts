@@ -1,8 +1,13 @@
-import express from 'express';
+import express, {
+  type Request,
+  type Response,
+  type NextFunction,
+} from 'express';
 import { Client as EsClient } from '@elastic/elasticsearch';
-import { env, type HealthResponse } from '@outbox/shared';
+import { env, type HealthResponse, type ApiError } from '@outbox/shared';
 import { pingDb } from '@outbox/db';
 import { createRedis, pingRedis } from '@outbox/queue';
+import { api } from './routes.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -48,6 +53,19 @@ app.get('/health', async (_req, res) => {
     dependencies,
   };
   res.status(allOk ? 200 : 503).json(body);
+});
+
+app.use('/api', api);
+
+// Last-resort handler: async route rejections land here. Log server-side, return
+// the error envelope — never a stack trace to the client (CONVENTIONS.md).
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  console.error('Unhandled API error:', err);
+  const body: ApiError = {
+    error: { code: 'internal', message: 'Internal server error.' },
+  };
+  res.status(500).json(body);
 });
 
 const server = app.listen(env.API_PORT, () => {

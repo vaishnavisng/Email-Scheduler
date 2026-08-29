@@ -53,6 +53,9 @@ importers:
       express:
         specifier: ^4.21.2
         version: 4.22.2(supports-color@7.2.0)
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
     devDependencies:
       '@types/express':
         specifier: ^4.17.21
