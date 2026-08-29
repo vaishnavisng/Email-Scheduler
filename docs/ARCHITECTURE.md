@@ -83,6 +83,25 @@ so it is crash recovery rather than a cron in disguise.>
 
 ## 4. Persistence across restarts
 
+**Schema** (`packages/db/schema.ts`, migration `drizzle/0000_*.sql`):
+`users`, `senders`, `slack_integrations`, `campaigns`, `emails`. All timestamps
+are `timestamptz`, stored UTC. `POST /api/campaigns` inserts the campaign plus one
+`emails` row per deduped recipient in a single transaction, with
+`scheduled_at = start_at + seq · delay_ms` and status `scheduled` — it does not
+enqueue (Phase 3 does). Every email/campaign write goes through
+`packages/db/emails.ts`; route handlers never touch the tables directly.
+
+Two choices worth flagging:
+
+- **`emails.sender_id` is nullable.** A sender is chosen when the worker claims
+  the job (Phase 3), so a merely-scheduled row has none yet. `ON DELETE set null`
+  keeps history if a sender is later removed. See `docs/DECISIONS/0002-*`.
+- **Identity is a verified HS256 JWT** (`packages/shared/jwt.ts`), `sub` = user id.
+  Phase 6's Google OAuth mints it via `ensureUser` (upsert by `google_sub`); the
+  API only verifies. No mock auth. See `docs/DECISIONS/0001-*`.
+
+
+
 | Failure | Outcome | Mechanism |
 |---|---|---|
 | API restarts | No impact on the schedule | Schedule lives in Redis, not the API process |
