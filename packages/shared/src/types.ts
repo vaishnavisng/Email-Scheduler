@@ -102,6 +102,8 @@ export interface EmailListItem {
   sentAt: string | null;
   attempts: number;
   lastError: string | null;
+  /** Ethereal preview URL for a sent message; null until sent (or in prod SMTP). */
+  previewUrl: string | null;
   createdAt: string;
 }
 

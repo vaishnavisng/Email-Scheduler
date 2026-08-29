@@ -66,6 +66,7 @@ export interface EmailDocSource {
   sentAt: Date | null;
   attempts: number;
   lastError: string | null;
+  previewUrl: string | null;
   createdAt: Date;
 }
 
@@ -84,6 +85,7 @@ interface EmailDoc {
   sent_at: string | null;
   attempts: number;
   last_error: string | null;
+  preview_url: string | null;
   created_at: string;
 }
 
@@ -104,6 +106,7 @@ export function toEmailDoc(row: EmailDocSource): EmailDoc {
     sent_at: toIso(row.sentAt),
     attempts: row.attempts,
     last_error: row.lastError,
+    preview_url: row.previewUrl,
     created_at: row.createdAt.toISOString(),
   };
 }
@@ -132,6 +135,7 @@ function docToItem(d: EmailDoc): EmailListItem {
     sentAt: d.sent_at,
     attempts: d.attempts,
     lastError: d.last_error,
+    previewUrl: d.preview_url ?? null,
     createdAt: d.created_at,
   };
 }
@@ -139,7 +143,7 @@ function docToItem(d: EmailDoc): EmailListItem {
 export interface SearchParams {
   userId: string;
   q?: string;
-  status?: EmailStatus;
+  status?: EmailStatus | EmailStatus[];
   from?: string;
   to?: string;
   page: number;
@@ -167,7 +171,12 @@ export function buildSearchBody(params: SearchParams): {
   const filter: Record<string, unknown>[] = [
     { term: { user_id: params.userId } },
   ];
-  if (params.status) filter.push({ term: { status: params.status } });
+  if (params.status)
+    filter.push(
+      Array.isArray(params.status)
+        ? { terms: { status: params.status } }
+        : { term: { status: params.status } },
+    );
   if (params.from || params.to) {
     filter.push({
       range: {

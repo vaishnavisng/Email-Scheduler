@@ -110,13 +110,16 @@ api.get('/emails', ah(async (req, res) => {
   res.json(result);
 }));
 
-/** Parse and validate the shared status query param. Returns undefined if absent,
- * or throws a 400-shaped sentinel string if unknown. */
-function parseStatus(raw: unknown): EmailStatus | undefined | 'invalid' {
+/** Parse the shared status query param, which may be a single status or a
+ * comma-separated list (e.g. `sent,failed` for the Sent tab). Returns undefined
+ * if absent, the 'invalid' sentinel if any value is unknown, else the list. */
+function parseStatus(raw: unknown): EmailStatus[] | undefined | 'invalid' {
   if (typeof raw !== 'string' || raw === '') return undefined;
-  return EMAIL_STATUSES.includes(raw as EmailStatus)
-    ? (raw as EmailStatus)
-    : 'invalid';
+  const parts = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  if (parts.length === 0) return undefined;
+  if (parts.some((p) => !EMAIL_STATUSES.includes(p as EmailStatus)))
+    return 'invalid';
+  return parts as EmailStatus[];
 }
 
 // Full-text search over the user's emails. Elasticsearch is primary; if it's

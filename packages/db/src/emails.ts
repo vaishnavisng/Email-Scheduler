@@ -247,6 +247,15 @@ export async function resetStalledSends(
 
 const toIso = (d: Date | null): string | null => (d ? d.toISOString() : null);
 
+/** One status, many, or none → the matching WHERE condition (undefined = no filter).
+ * Lets a tab like "Sent" request sent+failed in a single query. */
+function statusFilter(status?: EmailStatus | EmailStatus[]) {
+  if (!status) return undefined;
+  return Array.isArray(status)
+    ? inArray(emails.status, status)
+    : eq(emails.status, status);
+}
+
 /** One place a row becomes an EmailListItem, shared by list, search and PG fallback. */
 function toListItem(r: EmailRow): EmailListItem {
   return {
@@ -260,6 +269,7 @@ function toListItem(r: EmailRow): EmailListItem {
     sentAt: toIso(r.sentAt),
     attempts: r.attempts,
     lastError: r.lastError,
+    previewUrl: r.previewUrl,
     createdAt: r.createdAt.toISOString(),
   };
 }
@@ -279,6 +289,7 @@ export function toIndexSource(r: EmailRow): {
   sentAt: Date | null;
   attempts: number;
   lastError: string | null;
+  previewUrl: string | null;
   createdAt: Date;
 } {
   return {
@@ -295,6 +306,7 @@ export function toIndexSource(r: EmailRow): {
     sentAt: r.sentAt,
     attempts: r.attempts,
     lastError: r.lastError,
+    previewUrl: r.previewUrl,
     createdAt: r.createdAt,
   };
 }
@@ -328,7 +340,7 @@ export async function searchEmailsPg(
   userId: string,
   opts: {
     q?: string;
-    status?: EmailStatus;
+    status?: EmailStatus | EmailStatus[];
     from?: Date;
     to?: Date;
     page?: number;
@@ -347,7 +359,8 @@ export async function searchEmailsPg(
     );
     if (text) conds.push(text);
   }
-  if (opts.status) conds.push(eq(emails.status, opts.status));
+  const statusCond = statusFilter(opts.status);
+  if (statusCond) conds.push(statusCond);
   if (opts.from) conds.push(sql`${emails.scheduledAt} >= ${opts.from}`);
   if (opts.to) conds.push(sql`${emails.scheduledAt} <= ${opts.to}`);
   const where = and(...conds);
@@ -374,11 +387,12 @@ export async function searchEmailsPg(
 /** Paginated list of a user's emails, newest-scheduled ordering by seq for stable spacing. */
 export async function listEmails(
   userId: string,
-  opts: { status?: EmailStatus; page?: number; pageSize?: number },
+  opts: { status?: EmailStatus | EmailStatus[]; page?: number; pageSize?: number },
 ): Promise<{ data: EmailListItem[]; page: number; pageSize: number; total: number }> {
   const { page, pageSize, offset, limit } = clampPagination(opts);
-  const where = opts.status
-    ? and(eq(emails.userId, userId), eq(emails.status, opts.status))
+  const statusCond = statusFilter(opts.status);
+  const where = statusCond
+    ? and(eq(emails.userId, userId), statusCond)
     : eq(emails.userId, userId);
 
   const [rows, [totals]] = await Promise.all([

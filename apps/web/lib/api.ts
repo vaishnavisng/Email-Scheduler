@@ -1,7 +1,10 @@
 import type {
   MeResponse,
   EmailListResponse,
+  EmailSearchResponse,
   EmailStatus,
+  CreateCampaignRequest,
+  CreateCampaignResponse,
 } from '@outbox/shared';
 
 /**
@@ -47,9 +50,27 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export interface EmailListParams {
-  status?: EmailStatus;
+  status?: EmailStatus | EmailStatus[];
   page?: number;
   pageSize?: number;
+}
+
+export interface EmailSearchParams extends EmailListParams {
+  q?: string;
+}
+
+function emailQuery(params: EmailSearchParams): string {
+  const q = new URLSearchParams();
+  if (params.status)
+    q.set(
+      'status',
+      Array.isArray(params.status) ? params.status.join(',') : params.status,
+    );
+  if (params.page) q.set('page', String(params.page));
+  if (params.pageSize) q.set('pageSize', String(params.pageSize));
+  if (params.q) q.set('q', params.q);
+  const qs = q.toString();
+  return qs ? `?${qs}` : '';
 }
 
 export const api = {
@@ -58,14 +79,19 @@ export const api = {
 
   me: (): Promise<MeResponse> => request<MeResponse>('/api/me'),
 
-  emails: (params: EmailListParams = {}): Promise<EmailListResponse> => {
-    const q = new URLSearchParams();
-    if (params.status) q.set('status', params.status);
-    if (params.page) q.set('page', String(params.page));
-    if (params.pageSize) q.set('pageSize', String(params.pageSize));
-    const qs = q.toString();
-    return request<EmailListResponse>(`/api/emails${qs ? `?${qs}` : ''}`);
-  },
+  emails: (params: EmailListParams = {}): Promise<EmailListResponse> =>
+    request<EmailListResponse>(`/api/emails${emailQuery(params)}`),
+
+  search: (params: EmailSearchParams = {}): Promise<EmailSearchResponse> =>
+    request<EmailSearchResponse>(`/api/emails/search${emailQuery(params)}`),
+
+  createCampaign: (
+    body: CreateCampaignRequest,
+  ): Promise<CreateCampaignResponse> =>
+    request<CreateCampaignResponse>('/api/campaigns', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   logout: (): Promise<void> =>
     request<void>('/api/auth/logout', { method: 'POST' }),
