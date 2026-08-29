@@ -1,4 +1,4 @@
-import { and, asc, count, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
 import type { EmailStatus, EmailListItem } from '@outbox/shared';
 import { db } from './index.js';
 import { campaigns, emails } from './schema.js';
@@ -166,6 +166,47 @@ export async function markFailed(id: string, lastError: string): Promise<void> {
     .update(emails)
     .set({ status: 'failed', lastError, updatedAt: new Date() })
     .where(eq(emails.id, id));
+}
+
+/**
+ * Boot reconciliation, pass 1: every row Postgres still considers pending. The
+ * worker re-enqueues these with their deterministic jobIds; BullMQ ignores any
+ * that already exist, so this is safe to run on every boot. Overdue rows are
+ * enqueued with delay 0 by `enqueueEmailSends` (it clamps negative delays).
+ */
+export async function getReconcilable(): Promise<
+  { id: string; scheduledAt: Date }[]
+> {
+  return db
+    .select({ id: emails.id, scheduledAt: emails.scheduledAt })
+    .from(emails)
+    .where(inArray(emails.status, ['scheduled', 'queued']));
+}
+
+/**
+ * Boot reconciliation, pass 2: rescue rows a worker claimed but never finished
+ * (killed mid-send). A row stuck in `sending` past the stall threshold with no
+ * `message_id` is reset to `scheduled` so it becomes claimable again — but only
+ * while `attempts < 3`, so a poison message can't loop forever. Returns the
+ * reset rows for re-enqueue. `updated_at` is the claim time (claimForSending
+ * stamps it), so it doubles as "sending since".
+ */
+export async function resetStalledSends(
+  thresholdMs: number,
+): Promise<{ id: string; scheduledAt: Date }[]> {
+  const cutoff = new Date(Date.now() - thresholdMs);
+  return db
+    .update(emails)
+    .set({ status: 'scheduled', updatedAt: new Date() })
+    .where(
+      and(
+        eq(emails.status, 'sending'),
+        isNull(emails.messageId),
+        lt(emails.updatedAt, cutoff),
+        lt(emails.attempts, 3),
+      ),
+    )
+    .returning({ id: emails.id, scheduledAt: emails.scheduledAt });
 }
 
 const toIso = (d: Date | null): string | null => (d ? d.toISOString() : null);

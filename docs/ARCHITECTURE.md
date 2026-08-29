@@ -81,9 +81,12 @@ BullMQ stores it in a Redis sorted set keyed by fire timestamp and a worker
 promotes it when due. The schedule is therefore durable state in Redis, not a
 timer living in a Node process.
 
-**The one timer-adjacent thing in the codebase** is the boot reconciler at
-`<file:line>`. <Explain that it runs once at startup, not on a recurring interval,
-so it is crash recovery rather than a cron in disguise.>
+**The one timer-adjacent thing in the codebase** is the boot reconciler,
+`reconcileOnBoot()` in `apps/worker/src/reconcile.ts`, called once from
+`apps/worker/src/index.ts`. It runs exactly once at worker startup — no timer, no
+interval, nothing re-arms it — so it is crash recovery that reconciles Redis with
+Postgres after a restart, not a cron in disguise. See
+`docs/DECISIONS/0005-restart-persistence.md`.
 
 ---
 
@@ -116,16 +119,24 @@ Two choices worth flagging:
 | Redis data lost entirely | Fully recovered | Boot reconciler rebuilds from Postgres |
 | Worker killed mid-send | Row recovered, not duplicated | Stalled-`sending` sweep, bounded by `attempts` |
 
-**Boot reconciliation** (`<file:line>`) runs two passes:
+**Boot reconciliation** (`reconcileOnBoot()`, `apps/worker/src/reconcile.ts`)
+runs two passes:
 
-1. <Re-enqueue every row with status `scheduled` or `queued`, using the same
+1. `resetStalledSends()` — reset rows stuck in `sending` past
+   `STALLED_SEND_THRESHOLD_MS` with no `message_id` and `attempts < 3` back to
+   `scheduled`, so a worker killed mid-send doesn't strand the row (the
+   `attempts` bound stops a poison message looping forever).
+2. `getReconcilable()` + `enqueueEmailSends()` — re-enqueue every row with status
+   `scheduled` or `queued` (now including the ones just un-stuck) under the same
    deterministic job IDs. Duplicates are no-ops, which is what makes re-running
-   safe. Overdue rows enqueue with zero delay and drain subject to the rate
-   limiter — deliberate, since an outage shouldn't silently drop mail.>
-2. <Reset rows stuck in `sending` past `STALLED_SEND_THRESHOLD_MS` with no
-   `message_id`, provided `attempts < 3`.>
+   safe. Overdue rows enqueue with `delay: 0` and drain subject to the rate
+   limiter — deliberate, since an outage shouldn't silently drop mail.
 
-**Verified by:** `scripts/demo-restart.ts` — <describe the drill and the result.>
+**Verified by:** `scripts/demo-restart.ts` — schedules 10 emails at T+3min and
+prints the drill: `docker compose restart api worker` at T+1min, then all 10 send
+on time with zero duplicates in Ethereal. Integration tests
+`packages/queue/src/idempotency.test.ts` and `packages/db/src/claim.test.ts`
+cover the enqueue-dedup and concurrent-claim guarantees the drill relies on.
 
 ---
 

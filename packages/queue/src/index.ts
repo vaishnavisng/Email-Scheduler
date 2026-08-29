@@ -54,6 +54,15 @@ export function emailSendQueue(): Queue<EmailJobData> {
   return queue;
 }
 
+/** Close the lazy queue singleton (and its Redis connection). Mainly for tests
+ * and graceful shutdown — without it the connection keeps the process alive. */
+export async function closeEmailSendQueue(): Promise<void> {
+  if (queue) {
+    await queue.close();
+    queue = undefined;
+  }
+}
+
 const CHUNK = 500;
 
 export interface EmailToEnqueue {

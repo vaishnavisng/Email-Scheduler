@@ -15,6 +15,7 @@ import {
   type SenderRow,
 } from '@outbox/db';
 import { pickRoundRobin } from './pick.js';
+import { reconcileOnBoot } from './reconcile.js';
 
 /**
  * Worker process. Consumes email-send jobs and sends via Ethereal SMTP. The
@@ -95,6 +96,13 @@ worker.on('failed', async (job, err) => {
 
 worker.on('ready', () =>
   console.log(`worker up (concurrency=${env.WORKER_CONCURRENCY})`),
+);
+
+// One-shot crash recovery at boot — rebuild the Redis schedule from Postgres.
+// Not a timer, not a cron; runs exactly once. A failure here shouldn't stop the
+// worker from processing new jobs, so log and continue.
+reconcileOnBoot().catch((err) =>
+  console.error('reconcile: boot reconciliation failed', err),
 );
 
 // Await worker.close() so in-flight sends finish before the process exits.
