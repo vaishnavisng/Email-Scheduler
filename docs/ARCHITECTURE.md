@@ -38,7 +38,7 @@ it returns. Neither would hold if scheduling lived in the web server's memory.
 compose form
   → POST /api/campaigns
   → INSERT campaign + N email rows (status=scheduled)   [transaction commits]
-  → addBulk, jobId = email:{id}, delay = scheduledAt − now
+  → addBulk, jobId = email-{id}, delay = scheduledAt − now
   → BullMQ parks the job in a Redis sorted set
   → at fire time the worker picks it up
        → Lua: check throttle + hourly quota, reserve atomically
@@ -48,10 +48,13 @@ compose form
                      → enqueue index job → Elasticsearch
 ```
 
-**Why the DB commit precedes the enqueue:** <a job whose row hasn't committed yet
-is a race — the worker can pick it up and find nothing. The reverse failure (row
-committed, enqueue lost) is recoverable by the boot reconciler; a job pointing at
-a nonexistent row is not.>
+**Why the DB commit precedes the enqueue:** a job whose row hasn't committed yet
+is a race — the worker can pick it up and find nothing (or the transaction rolls
+back and the row never exists). The reverse failure (row committed, enqueue lost)
+is recoverable by the boot reconciler re-adding it under the same deterministic
+job id; a job pointing at a nonexistent row is not. So `POST /api/campaigns`
+commits the transaction, then calls `enqueueEmailSends`
+(`apps/api/src/routes.ts`, `packages/queue/src/index.ts`).
 
 **Redis carries two unrelated concerns**, worth separating in your head:
 
@@ -67,13 +70,16 @@ makes reconciliation possible.
 
 ## 3. Scheduling, and why there is no cron
 
-<State plainly: no OS crontab, no node-cron, agenda or node-schedule, and no
-setInterval-based scheduling loop anywhere in the codebase.>
+No OS crontab, no node-cron / agenda / node-schedule, and no setInterval-based
+scheduling loop anywhere in the codebase. (`cron-parser` appears as a transitive
+dependency of BullMQ's repeatable-jobs feature, which we do not use — we use only
+delayed jobs.)
 
-Scheduling is BullMQ delayed jobs. <Explain: BullMQ stores delayed jobs in a Redis
-sorted set keyed by fire timestamp, and a worker promotes them when due. The
-schedule is therefore durable state in Redis, not a timer living in a Node
-process.>
+Scheduling is BullMQ delayed jobs. `enqueueEmailSends`
+(`packages/queue/src/index.ts`) adds each job with `delay = scheduledAt − now`;
+BullMQ stores it in a Redis sorted set keyed by fire timestamp and a worker
+promotes it when due. The schedule is therefore durable state in Redis, not a
+timer living in a Node process.
 
 **The one timer-adjacent thing in the codebase** is the boot reconciler at
 `<file:line>`. <Explain that it runs once at startup, not on a recurring interval,
@@ -127,19 +133,23 @@ Two choices worth flagging:
 
 Three independent layers. Any one failing still doesn't produce a duplicate send.
 
-1. **Deterministic job ID** — `email:{row.id}` (`<file:line>`). <BullMQ refuses a
-   second job with an existing jobId, so reconciliation can run any number of
-   times without double-scheduling.>
-2. **Guarded claim** — `UPDATE emails SET status='sending' ... WHERE id=$1 AND
-   status IN ('scheduled','queued') RETURNING *` (`<file:line>`). <A single atomic
-   statement, so with concurrency > 1 exactly one worker claims a row. Zero rows
-   returned means someone else has it, and the processor returns successfully
-   rather than throwing.>
-3. **Unique constraint** — `UNIQUE(campaign_id, recipient)`. <Stops duplicates at
-   the source: re-submitting the same CSV can't create a second row.>
+1. **Deterministic job ID** — `email-{row.id}` (`enqueueEmailSends`,
+   `packages/queue/src/index.ts`). BullMQ refuses a second job with an existing
+   jobId, so reconciliation can run any number of times without double-scheduling.
+   (BullMQ forbids `:` in a custom jobId, so the `email:{id}` convention uses `-`;
+   the id is a UUID, so determinism is unaffected.)
+2. **Guarded claim** — `UPDATE emails SET status='sending', attempts=attempts+1 ...
+   WHERE id=$1 AND status IN ('scheduled','queued') RETURNING *` (`claimForSending`,
+   `packages/db/src/emails.ts`). A single atomic statement, so with concurrency > 1
+   exactly one worker claims a row. Zero rows returned means someone else has it (or
+   it's already sent), and the processor returns successfully rather than throwing.
+3. **Unique constraint** — `UNIQUE(campaign_id, recipient)`. Stops duplicates at
+   the source: re-submitting the same CSV can't create a second row.
 
-**Verified by:** <tests at file:line — the double-enqueue test and the concurrent-
-claim test.>
+**Retry interplay:** a send failure would otherwise leave the row stuck in
+`sending`, and the guarded claim (step 2) would no-op every BullMQ retry. So the
+processor calls `resetForRetry` (`sending`→`queued`) before re-throwing, and only
+the final `failed` event (attempts exhausted) writes `failed` + `last_error`.
 
 ---
 

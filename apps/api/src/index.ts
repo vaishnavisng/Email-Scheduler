@@ -4,9 +4,13 @@ import express, {
   type NextFunction,
 } from 'express';
 import { Client as EsClient } from '@elastic/elasticsearch';
+import basicAuth from 'express-basic-auth';
+import { createBullBoard } from '@bull-board/api';
+import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
+import { ExpressAdapter } from '@bull-board/express';
 import { env, type HealthResponse, type ApiError } from '@outbox/shared';
 import { pingDb } from '@outbox/db';
-import { createRedis, pingRedis } from '@outbox/queue';
+import { createRedis, pingRedis, emailSendQueue } from '@outbox/queue';
 import { api } from './routes.js';
 
 const app = express();
@@ -54,6 +58,23 @@ app.get('/health', async (_req, res) => {
   };
   res.status(allOk ? 200 : 503).json(body);
 });
+
+// Bull Board — live queue visibility, behind basic auth. Job history is retained
+// (see the queue's removeOnComplete config) so the demo can show completed jobs.
+const bullBoard = new ExpressAdapter();
+bullBoard.setBasePath('/admin/queues');
+createBullBoard({
+  queues: [new BullMQAdapter(emailSendQueue())],
+  serverAdapter: bullBoard,
+});
+app.use(
+  '/admin/queues',
+  basicAuth({
+    users: { [env.BULLBOARD_USER]: env.BULLBOARD_PASS },
+    challenge: true,
+  }),
+  bullBoard.getRouter(),
+);
 
 app.use('/api', api);
 
