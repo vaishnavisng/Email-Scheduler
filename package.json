@@ -16,7 +16,9 @@
     "db:migrate": "pnpm --filter @outbox/db migrate",
     "bootstrap": "tsx scripts/bootstrap.ts",
     "reindex": "tsx scripts/reindex.ts",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "smoke-test": "node --env-file=.env --import tsx scripts/smoke-test.ts",
+    "load-test": "node --env-file=.env --import tsx scripts/load-test.ts"
   },
   "devDependencies": {
     "@outbox/db": "workspace:*",

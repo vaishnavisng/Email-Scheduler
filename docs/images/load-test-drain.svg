@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 420" font-family="ui-sans-serif,Segoe UI,Helvetica,Arial,sans-serif">
+  <rect width="820" height="420" rx="10" fill="#ffffff"/>
+  <text x="64" y="28" font-size="16" font-weight="700" fill="#111827">email-send queue drain — 1200 jobs scheduled for the same instant</text>
+  <text x="64" y="44" font-size="11" fill="#6b7280">3 senders · min-delay 2000ms · concurrency 5 · 200/sender/window — measured by scripts/load-test.ts</text>
+  <line x1="64" y1="368" x2="796" y2="368" stroke="#eef1f4"/><text x="54" y="372" font-size="11" fill="#6b7280" text-anchor="end">0</text><line x1="64" y1="289.5" x2="796" y2="289.5" stroke="#eef1f4"/><text x="54" y="293.5" font-size="11" fill="#6b7280" text-anchor="end">300</text><line x1="64" y1="211" x2="796" y2="211" stroke="#eef1f4"/><text x="54" y="215" font-size="11" fill="#6b7280" text-anchor="end">600</text><line x1="64" y1="132.5" x2="796" y2="132.5" stroke="#eef1f4"/><text x="54" y="136.5" font-size="11" fill="#6b7280" text-anchor="end">900</text><line x1="64" y1="54" x2="796" y2="54" stroke="#eef1f4"/><text x="54" y="58" font-size="11" fill="#6b7280" text-anchor="end">1200</text>
+  <text x="64" y="388" font-size="11" fill="#6b7280" text-anchor="middle">0s</text><text x="245.48760330578514" y="388" font-size="11" fill="#6b7280" text-anchor="middle">30s</text><text x="426.9752066115703" y="388" font-size="11" fill="#6b7280" text-anchor="middle">60s</text><text x="608.4628099173553" y="388" font-size="11" fill="#6b7280" text-anchor="middle">90s</text><text x="789.9504132231406" y="388" font-size="11" fill="#6b7280" text-anchor="middle">120s</text>
+  <text x="430" y="410" font-size="11" fill="#374151" text-anchor="middle">elapsed (seconds)</text>
+  <path d="M64.0,54.0 L94.2,54.0 L124.5,56.4 L154.7,57.9 L185.0,60.0 L215.2,61.6 L245.5,61.6 L275.7,61.6 L306.0,61.6 L336.2,61.6 L366.5,63.4 L402.8,65.3 L433.0,67.1 L463.3,68.9 L493.5,70.0 L523.8,72.1 L554.0,73.9 L584.3,76.0 L614.5,77.6 L644.8,79.1 L675.0,81.2 L705.3,83.0 L735.5,85.1 L765.8,86.4 L796.0,86.4" fill="none" stroke="#f59e0b" stroke-width="2.5"/>
+  <path d="M64.0,368.0 L94.2,368.0 L124.5,365.6 L154.7,364.1 L185.0,362.0 L215.2,360.4 L245.5,360.4 L275.7,360.4 L306.0,360.4 L336.2,360.4 L366.5,358.6 L402.8,356.7 L433.0,354.9 L463.3,353.1 L493.5,352.0 L523.8,349.9 L554.0,348.1 L584.3,346.0 L614.5,344.4 L644.8,342.9 L675.0,340.8 L705.3,339.0 L735.5,336.9 L765.8,335.6 L796.0,335.6" fill="none" stroke="#2563eb" stroke-width="2.5"/>
+  <g font-size="12">
+    <rect x="564" y="60" width="12" height="12" fill="#f59e0b" rx="2"/>
+    <text x="580" y="70" fill="#374151">pending (waiting/scheduled/sending)</text>
+    <rect x="564" y="80" width="12" height="12" fill="#2563eb" rx="2"/>
+    <text x="580" y="90" fill="#374151">sent (cumulative)</text>
+  </g>
+</svg>

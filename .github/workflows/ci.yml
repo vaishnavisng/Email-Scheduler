@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    name: typecheck · lint · unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+
+  smoke:
+    name: compose stack · smoke test
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Prepare env
+        run: cp .env.example .env
+      - name: Bring up the stack
+        run: docker compose up -d --build
+      - name: Wait for the API to be healthy
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:4000/health >/dev/null; then
+              echo "API healthy"; exit 0
+            fi
+            sleep 5
+          done
+          echo "API never became healthy"; exit 1
+      - name: Smoke test
+        run: pnpm smoke-test
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
