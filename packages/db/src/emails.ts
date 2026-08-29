@@ -1,7 +1,9 @@
-import { and, asc, count, eq } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, sql } from 'drizzle-orm';
 import type { EmailStatus, EmailListItem } from '@outbox/shared';
 import { db } from './index.js';
 import { campaigns, emails } from './schema.js';
+
+export type EmailRow = typeof emails.$inferSelect;
 
 /**
  * The single place email/campaign rows are written or read. Route handlers never
@@ -57,7 +59,11 @@ export interface CreateCampaignInput {
 export async function createCampaignWithEmails(
   userId: string,
   input: CreateCampaignInput,
-): Promise<{ id: string; totalRecipients: number }> {
+): Promise<{
+  id: string;
+  totalRecipients: number;
+  emails: { id: string; scheduledAt: Date }[];
+}> {
   const recipients = [...new Set(input.recipients.map((r) => r.trim()))].filter(
     Boolean,
   );
@@ -79,23 +85,87 @@ export async function createCampaignWithEmails(
     if (!campaign) throw new Error('campaign insert returned no row');
     const campaignId = campaign.id;
 
-    if (recipients.length > 0) {
-      await tx.insert(emails).values(
-        recipients.map((recipient, seq) => ({
-          campaignId,
-          userId,
-          recipient,
-          subject: input.subject,
-          body: input.body,
-          status: 'scheduled' as const,
-          seq,
-          scheduledAt: scheduledAtFor(input.startAt, seq, input.delayMs),
-        })),
-      );
-    }
+    // .returning() the ids + fire times so the caller can enqueue after commit.
+    const inserted =
+      recipients.length > 0
+        ? await tx
+            .insert(emails)
+            .values(
+              recipients.map((recipient, seq) => ({
+                campaignId,
+                userId,
+                recipient,
+                subject: input.subject,
+                body: input.body,
+                status: 'scheduled' as const,
+                seq,
+                scheduledAt: scheduledAtFor(input.startAt, seq, input.delayMs),
+              })),
+            )
+            .returning({ id: emails.id, scheduledAt: emails.scheduledAt })
+        : [];
 
-    return { id: campaignId, totalRecipients: recipients.length };
+    return {
+      id: campaignId,
+      totalRecipients: recipients.length,
+      emails: inserted,
+    };
   });
+}
+
+/**
+ * Idempotency layer 2: atomically claim a row for sending. The single guarded
+ * UPDATE means that with concurrency > 1 exactly one worker wins. Zero rows back
+ * = another worker has it, or it's already sent/cancelled — the caller returns
+ * successfully rather than throwing.
+ */
+export async function claimForSending(id: string): Promise<EmailRow | null> {
+  const [row] = await db
+    .update(emails)
+    .set({
+      status: 'sending',
+      attempts: sql`${emails.attempts} + 1`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(eq(emails.id, id), inArray(emails.status, ['scheduled', 'queued'])),
+    )
+    .returning();
+  return row ?? null;
+}
+
+export async function markSent(
+  id: string,
+  data: { senderId: string; messageId: string | null; previewUrl: string | null },
+): Promise<void> {
+  await db
+    .update(emails)
+    .set({
+      status: 'sent',
+      sentAt: new Date(),
+      senderId: data.senderId,
+      messageId: data.messageId,
+      previewUrl: data.previewUrl,
+      updatedAt: new Date(),
+    })
+    .where(eq(emails.id, id));
+}
+
+/** Release a claimed row back to 'queued' so a BullMQ retry can re-claim it.
+ * Without this, a failed send leaves the row stuck in 'sending' and every retry
+ * would no-op against the guarded claim. */
+export async function resetForRetry(id: string): Promise<void> {
+  await db
+    .update(emails)
+    .set({ status: 'queued', updatedAt: new Date() })
+    .where(and(eq(emails.id, id), eq(emails.status, 'sending')));
+}
+
+export async function markFailed(id: string, lastError: string): Promise<void> {
+  await db
+    .update(emails)
+    .set({ status: 'failed', lastError, updatedAt: new Date() })
+    .where(eq(emails.id, id));
 }
 
 const toIso = (d: Date | null): string | null => (d ? d.toISOString() : null);

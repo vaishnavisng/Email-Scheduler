@@ -21,6 +21,7 @@ import {
   listEmails,
   createCampaignWithEmails,
 } from '@outbox/db';
+import { enqueueEmailSends } from '@outbox/queue';
 
 function fail(res: Response, status: number, code: string, message: string): void {
   const body: ApiError = { error: { code, message } };
@@ -105,14 +106,19 @@ api.post('/campaigns', ah(async (req, res) => {
     return;
   }
   const { subject, body, startAt, delayMs, recipients, hourlyLimit } = parsed.data;
-  const { id, totalRecipients } = await createCampaignWithEmails(userId(req), {
-    subject,
-    body,
-    startAt: new Date(startAt),
-    delayMs,
-    recipients,
-    hourlyLimit,
-  });
+  const { id, totalRecipients, emails } = await createCampaignWithEmails(
+    userId(req),
+    {
+      subject,
+      body,
+      startAt: new Date(startAt),
+      delayMs,
+      recipients,
+      hourlyLimit,
+    },
+  );
+  // Enqueue only after the transaction has committed — see ARCHITECTURE §2.
+  await enqueueEmailSends(emails);
   const response: CreateCampaignResponse = { id, totalRecipients, startAt, delayMs };
   res.status(201).json(response);
 }));

@@ -49,15 +49,25 @@ services:
       retries: 15
       start_period: 30s
 
-  # One-shot init container: applies migrations, then exits. Reuses the api
-  # image and overrides the command. Dependents gate on its clean completion.
+  # One-shot init container: applies migrations and provisions Ethereal senders,
+  # then exits. Reuses the api image and overrides the command. Dependents gate
+  # on its clean completion.
   migrate:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    command: ['pnpm', '--filter', '@outbox/db', 'migrate']
+    command: ['pnpm', 'bootstrap']
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-outbox}:${POSTGRES_PASSWORD:-outbox}@postgres:5432/${POSTGRES_DB:-outbox}
+      # Match the API so the demo JWT logged here validates against it.
+      JWT_SECRET: ${JWT_SECRET:-dev-insecure-jwt-secret-change-me}
+      # Optional offline fallback if Ethereal's account API is unreachable.
+      ETHEREAL_USER_1: ${ETHEREAL_USER_1:-}
+      ETHEREAL_PASS_1: ${ETHEREAL_PASS_1:-}
+      ETHEREAL_USER_2: ${ETHEREAL_USER_2:-}
+      ETHEREAL_PASS_2: ${ETHEREAL_PASS_2:-}
+      ETHEREAL_USER_3: ${ETHEREAL_USER_3:-}
+      ETHEREAL_PASS_3: ${ETHEREAL_PASS_3:-}
     depends_on:
       postgres:
         condition: service_healthy
