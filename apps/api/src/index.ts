@@ -3,14 +3,19 @@ import express, {
   type Response,
   type NextFunction,
 } from 'express';
-import { Client as EsClient } from '@elastic/elasticsearch';
 import basicAuth from 'express-basic-auth';
 import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { ExpressAdapter } from '@bull-board/express';
 import { env, type HealthResponse, type ApiError } from '@outbox/shared';
 import { pingDb } from '@outbox/db';
-import { createRedis, pingRedis, emailSendQueue } from '@outbox/queue';
+import { createEs } from '@outbox/search';
+import {
+  createRedis,
+  pingRedis,
+  emailSendQueue,
+  emailIndexQueue,
+} from '@outbox/queue';
 import { api } from './routes.js';
 import { slackCallbackRouter } from './slack.js';
 
@@ -19,7 +24,7 @@ app.disable('x-powered-by');
 app.use(express.json());
 
 const redis = createRedis();
-const es = new EsClient({ node: env.ELASTICSEARCH_URL });
+const es = createEs();
 
 async function pingEs(): Promise<boolean> {
   try {
@@ -65,7 +70,10 @@ app.get('/health', async (_req, res) => {
 const bullBoard = new ExpressAdapter();
 bullBoard.setBasePath('/admin/queues');
 createBullBoard({
-  queues: [new BullMQAdapter(emailSendQueue())],
+  queues: [
+    new BullMQAdapter(emailSendQueue()),
+    new BullMQAdapter(emailIndexQueue()),
+  ],
   serverAdapter: bullBoard,
 });
 app.use(

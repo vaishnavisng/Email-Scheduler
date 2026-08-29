@@ -59,6 +59,7 @@ services:
     command: ['pnpm', 'bootstrap']
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-outbox}:${POSTGRES_PASSWORD:-outbox}@postgres:5432/${POSTGRES_DB:-outbox}
+      ELASTICSEARCH_URL: http://elasticsearch:9200
       # Match the API so the demo JWT logged here validates against it.
       JWT_SECRET: ${JWT_SECRET:-dev-insecure-jwt-secret-change-me}
       # Optional offline fallback if Ethereal's account API is unreachable.
@@ -70,6 +71,10 @@ services:
       ETHEREAL_PASS_3: ${ETHEREAL_PASS_3:-}
     depends_on:
       postgres:
+        condition: service_healthy
+      # Wait for ES so the emails index is created with its explicit mapping at
+      # boot; bootstrap degrades gracefully if it's still unreachable.
+      elasticsearch:
         condition: service_healthy
     restart: 'no'
 

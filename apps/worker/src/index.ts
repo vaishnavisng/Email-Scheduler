@@ -8,6 +8,7 @@ import {
   reserveSlot,
   readUsed,
   windowFor,
+  enqueueIndex,
   type EmailJobData,
 } from '@outbox/queue';
 import {
@@ -23,6 +24,15 @@ import {
 import { pickMostQuota } from './pick.js';
 import { reconcileOnBoot } from './reconcile.js';
 import { notifyRateLimit } from './notify.js';
+import { startIndexWorker } from './index-worker.js';
+
+/** Re-index a row after a status transition. Fire-and-forget: a failed enqueue
+ * must never break a send (the reindex script and boot backfill cover gaps). */
+function reindex(emailId: string): void {
+  enqueueIndex(emailId).catch((err) =>
+    console.error(`email ${emailId}: index enqueue failed`, err),
+  );
+}
 
 /**
  * Worker process. Consumes email-send jobs and sends via Ethereal SMTP. The
@@ -54,6 +64,7 @@ async function send(job: Job<EmailJobData>, token?: string): Promise<void> {
   if (!sender) {
     // No senders provisioned — reset so a retry can pick one up once they exist.
     await resetForRetry(emailId);
+    reindex(emailId);
     throw new Error('no active senders available');
   }
 
@@ -105,6 +116,7 @@ async function send(job: Job<EmailJobData>, token?: string): Promise<void> {
     console.log(`email ${emailId}: nothing to claim, skipping`);
     return;
   }
+  reindex(email.id); // → 'sending'
 
   try {
     const info = await transportFor(sender).sendMail({
@@ -118,10 +130,12 @@ async function send(job: Job<EmailJobData>, token?: string): Promise<void> {
       messageId: info.messageId ?? null,
       previewUrl: nodemailer.getTestMessageUrl(info) || null,
     });
+    reindex(email.id); // → 'sent'
     console.log(`email ${email.id}: sent via ${sender.label}`);
   } catch (err) {
     // Release the claim so BullMQ's retry can re-claim; then rethrow to trigger it.
     await resetForRetry(email.id);
+    reindex(email.id); // → 'queued'
     throw err;
   }
 }
@@ -152,6 +166,7 @@ worker.on('failed', async (job, err) => {
     await markFailed(job.data.emailId, err.message).catch((e) =>
       console.error(`email ${job.data.emailId}: markFailed errored`, e),
     );
+    reindex(job.data.emailId); // → 'failed'
     console.error(`email ${job.data.emailId}: failed permanently — ${err.message}`);
   }
 });
@@ -167,11 +182,14 @@ reconcileOnBoot().catch((err) =>
   console.error('reconcile: boot reconciliation failed', err),
 );
 
+// Second Worker: drains the email-index queue into Elasticsearch, off the send path.
+const indexWorker = startIndexWorker();
+
 // Await worker.close() so in-flight sends finish before the process exits.
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.on(signal, async () => {
     console.log(`${signal} received, draining…`);
-    await worker.close();
+    await Promise.all([worker.close(), indexWorker.close()]);
     await Promise.all([connection.quit(), rr.quit()]);
     process.exit(0);
   });

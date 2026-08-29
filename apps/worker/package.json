@@ -12,6 +12,7 @@
   "dependencies": {
     "@outbox/db": "workspace:*",
     "@outbox/queue": "workspace:*",
+    "@outbox/search": "workspace:*",
     "@outbox/shared": "workspace:*",
     "bullmq": "^5.34.5",
     "ioredis": "^5.4.2",

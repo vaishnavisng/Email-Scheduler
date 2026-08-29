@@ -12,4 +12,5 @@ export {
   type CreateCampaignResponse,
   type EmailListItem,
   type EmailListResponse,
+  type EmailSearchResponse,
 } from './types.js';

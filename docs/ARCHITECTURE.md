@@ -226,11 +226,29 @@ memory, drain rate. Reference the Bull Board screenshot in `docs/images/`.>
 
 ## 8. Search indexing
 
-<Explain the second-queue design: indexing runs on `email-index`, never inline in
-the send path, so a slow or down Elasticsearch cannot slow or fail a send. Upsert
-by `_id = email.id` makes retries and reprocessing harmless, and BullMQ's retries
-give at-least-once indexing. Note the Postgres ILIKE fallback with the `degraded`
-flag, and that search is always filtered by the authenticated user.>
+Indexing runs on a **second BullMQ queue, `email-index`, never inline in the send
+path** — a slow or down Elasticsearch can only back-pressure indexing, never slow
+or fail a send. The API/worker just enqueue `{ emailId }`; a separate `Worker`
+(`apps/worker/src/index-worker.ts`) reads the row fresh from Postgres and upserts
+into ES.
+
+- **Upsert by `_id = email.id`** makes reprocessing harmless; with BullMQ retries
+  (5 attempts) this is **at-least-once** indexing.
+- **Enqueued** on campaign creation (bulk) and after every worker status
+  transition (`sending`/`sent`/`queued`/`failed`). The re-park (`scheduled_at`
+  only) is intentionally not re-indexed.
+- **Explicit mapping created at boot** (`ensureEmailsIndex`, in `bootstrap`,
+  non-fatal; re-ensured once in the index worker so a missing index is never
+  auto-created with a guessed mapping). `recipient` = keyword + `.text` subfield,
+  `subject`/`body` = text, `status`/`user_id`/`sender_id` = keyword,
+  `scheduled_at`/`sent_at` = date.
+- **`GET /api/emails/search`** (`q`/`status`/`from`/`to`, paginated, date-sorted)
+  is **always filtered by the authenticated user's id** (`buildSearchBody`,
+  unit-tested for that invariant). If ES is unreachable it **falls back to a
+  Postgres `ILIKE`** query and returns `degraded: true`.
+- **`pnpm reindex`** rebuilds the index from Postgres via chunked bulk upsert.
+
+See `docs/DECISIONS/0008-search-indexing.md`.
 
 ---
 
@@ -278,10 +296,14 @@ awaited before `moveToDelayed` — it's guaranteed not to throw.
 
 ## 10. Security notes
 
-<Session cookie httpOnly and SameSite; Bull Board behind basic auth; every list and
-search endpoint scoped to the authenticated user; SMTP credentials stored
-server-side only and never returned to the client; OAuth state parameter signed
-with a short TTL.>
+- **Bull Board** (`/admin/queues`, both queues) sits behind HTTP basic auth
+  (`BULLBOARD_USER`/`BULLBOARD_PASS`), mounted before the API router.
+- **Every list and search endpoint is scoped to the authenticated user** — the
+  search query's `user_id` filter is unconditional (`buildSearchBody`), so a
+  crafted `q` can't cross tenants.
+- SMTP credentials are stored server-side only and never serialized to the client.
+- The Slack OAuth `state` is a signed, short-TTL JWT (no session store).
+- Errors return `{ error: { code, message } }`; stack traces never leak.
 
 ---
 
@@ -289,12 +311,15 @@ with a short TTL.>
 
 Be specific. Reviewers trust a candidate who names their own gaps.
 
-- <Ordering within a rescheduled window is approximate, not guaranteed.>
-- <OAuth client credentials are committed to this private repo for evaluation
-  convenience; they'll be rotated afterwards.>
-- <Sender SMTP credentials are stored unencrypted; production would use a KMS.>
-- <Elasticsearch runs single-node with security disabled — local dev only.>
-- <No dead-letter queue UI; failed jobs are visible in Bull Board only.>
+- Ordering within a rescheduled window is approximate, not guaranteed.
+- OAuth client credentials are committed to this private repo for evaluation
+  convenience; they'll be rotated afterwards.
+- Sender SMTP credentials are stored unencrypted; production would use a KMS.
+- Elasticsearch runs single-node with security disabled — local dev only.
+- No dead-letter queue UI; failed jobs are visible in Bull Board only.
+- Search is eventually consistent: results lag the DB by the index-job latency,
+  and the ILIKE fallback during an ES outage is unranked. Postgres stays the
+  source of truth, and the plain list endpoints are always exact.
 
 ---
 

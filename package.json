@@ -15,10 +15,12 @@
     "db:generate": "pnpm --filter @outbox/db generate",
     "db:migrate": "pnpm --filter @outbox/db migrate",
     "bootstrap": "tsx scripts/bootstrap.ts",
+    "reindex": "tsx scripts/reindex.ts",
     "smoke": "node scripts/smoke.mjs"
   },
   "devDependencies": {
     "@outbox/db": "workspace:*",
+    "@outbox/search": "workspace:*",
     "@outbox/shared": "workspace:*",
     "@types/nodemailer": "^6.4.17",
     "@types/node": "^22.10.2",

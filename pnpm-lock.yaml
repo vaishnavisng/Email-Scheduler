@@ -11,6 +11,9 @@ importers:
       '@outbox/db':
         specifier: workspace:*
         version: link:packages/db
+      '@outbox/search':
+        specifier: workspace:*
+        version: link:packages/search
       '@outbox/shared':
         specifier: workspace:*
         version: link:packages/shared
@@ -56,15 +59,15 @@ importers:
       '@bull-board/express':
         specifier: ^6.5.3
         version: 6.21.3(supports-color@7.2.0)
-      '@elastic/elasticsearch':
-        specifier: ^8.16.2
-        version: 8.19.2(supports-color@7.2.0)
       '@outbox/db':
         specifier: workspace:*
         version: link:../../packages/db
       '@outbox/queue':
         specifier: workspace:*
         version: link:../../packages/queue
+      '@outbox/search':
+        specifier: workspace:*
+        version: link:../../packages/search
       '@outbox/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -121,6 +124,9 @@ importers:
       '@outbox/queue':
         specifier: workspace:*
         version: link:../../packages/queue
+      '@outbox/search':
+        specifier: workspace:*
+        version: link:../../packages/search
       '@outbox/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -177,6 +183,19 @@ importers:
       ioredis:
         specifier: ^5.4.2
         version: 5.11.1(supports-color@7.2.0)
+    devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
+  packages/search:
+    dependencies:
+      '@elastic/elasticsearch':
+        specifier: ^8.16.2
+        version: 8.19.2(supports-color@7.2.0)
+      '@outbox/shared':
+        specifier: workspace:*
+        version: link:../shared
     devDependencies:
       typescript:
         specifier: ^5.7.2

@@ -1,4 +1,4 @@
-import { and, asc, count, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { EmailStatus, EmailListItem } from '@outbox/shared';
 import { db } from './index.js';
 import { campaigns, emails } from './schema.js';
@@ -247,6 +247,130 @@ export async function resetStalledSends(
 
 const toIso = (d: Date | null): string | null => (d ? d.toISOString() : null);
 
+/** One place a row becomes an EmailListItem, shared by list, search and PG fallback. */
+function toListItem(r: EmailRow): EmailListItem {
+  return {
+    id: r.id,
+    campaignId: r.campaignId,
+    recipient: r.recipient,
+    subject: r.subject,
+    status: r.status,
+    seq: r.seq,
+    scheduledAt: r.scheduledAt.toISOString(),
+    sentAt: toIso(r.sentAt),
+    attempts: r.attempts,
+    lastError: r.lastError,
+    createdAt: r.createdAt.toISOString(),
+  };
+}
+
+/** The fields the search indexer stores (EmailDocSource in @outbox/search). */
+export function toIndexSource(r: EmailRow): {
+  id: string;
+  campaignId: string;
+  userId: string;
+  senderId: string | null;
+  recipient: string;
+  subject: string;
+  body: string;
+  status: EmailStatus;
+  seq: number;
+  scheduledAt: Date;
+  sentAt: Date | null;
+  attempts: number;
+  lastError: string | null;
+  createdAt: Date;
+} {
+  return {
+    id: r.id,
+    campaignId: r.campaignId,
+    userId: r.userId,
+    senderId: r.senderId,
+    recipient: r.recipient,
+    subject: r.subject,
+    body: r.body,
+    status: r.status,
+    seq: r.seq,
+    scheduledAt: r.scheduledAt,
+    sentAt: r.sentAt,
+    attempts: r.attempts,
+    lastError: r.lastError,
+    createdAt: r.createdAt,
+  };
+}
+
+/** Full row for the index worker, or null if the row is gone. */
+export async function getEmailForIndex(
+  id: string,
+): Promise<ReturnType<typeof toIndexSource> | null> {
+  const [row] = await db.select().from(emails).where(eq(emails.id, id));
+  return row ? toIndexSource(row) : null;
+}
+
+/**
+ * Every email row for a full reindex, ordered by id so a resumed run is stable.
+ * ponytail: loads all rows into memory — fine for demo volume; add keyset paging
+ * if the table ever outgrows RAM.
+ */
+export async function getAllEmailsForIndex(): Promise<
+  ReturnType<typeof toIndexSource>[]
+> {
+  const rows = await db.select().from(emails).orderBy(asc(emails.id));
+  return rows.map(toIndexSource);
+}
+
+/**
+ * Postgres fallback for search when Elasticsearch is unreachable. ILIKE over
+ * subject/body/recipient, always scoped to the user, same filters and paging as
+ * the ES path. Correct but unranked — the route flags the response `degraded`.
+ */
+export async function searchEmailsPg(
+  userId: string,
+  opts: {
+    q?: string;
+    status?: EmailStatus;
+    from?: Date;
+    to?: Date;
+    page?: number;
+    pageSize?: number;
+  },
+): Promise<{ data: EmailListItem[]; page: number; pageSize: number; total: number }> {
+  const { page, pageSize, offset, limit } = clampPagination(opts);
+  const conds = [eq(emails.userId, userId)];
+  if (opts.q) {
+    const like = `%${opts.q}%`;
+    // or(...) is never empty here, but its type is T | undefined — assert with a reason.
+    const text = or(
+      ilike(emails.subject, like),
+      ilike(emails.body, like),
+      ilike(emails.recipient, like),
+    );
+    if (text) conds.push(text);
+  }
+  if (opts.status) conds.push(eq(emails.status, opts.status));
+  if (opts.from) conds.push(sql`${emails.scheduledAt} >= ${opts.from}`);
+  if (opts.to) conds.push(sql`${emails.scheduledAt} <= ${opts.to}`);
+  const where = and(...conds);
+
+  const [rows, [totals]] = await Promise.all([
+    db
+      .select()
+      .from(emails)
+      .where(where)
+      .orderBy(desc(emails.scheduledAt), asc(emails.seq))
+      .limit(limit)
+      .offset(offset),
+    db.select({ n: count() }).from(emails).where(where),
+  ]);
+
+  return {
+    data: rows.map(toListItem),
+    page,
+    pageSize,
+    total: totals?.n ?? 0,
+  };
+}
+
 /** Paginated list of a user's emails, newest-scheduled ordering by seq for stable spacing. */
 export async function listEmails(
   userId: string,
@@ -268,19 +392,5 @@ export async function listEmails(
     db.select({ n: count() }).from(emails).where(where),
   ]);
 
-  const data: EmailListItem[] = rows.map((r) => ({
-    id: r.id,
-    campaignId: r.campaignId,
-    recipient: r.recipient,
-    subject: r.subject,
-    status: r.status,
-    seq: r.seq,
-    scheduledAt: r.scheduledAt.toISOString(),
-    sentAt: toIso(r.sentAt),
-    attempts: r.attempts,
-    lastError: r.lastError,
-    createdAt: r.createdAt.toISOString(),
-  }));
-
-  return { data, page, pageSize, total: totals?.n ?? 0 };
+  return { data: rows.map(toListItem), page, pageSize, total: totals?.n ?? 0 };
 }

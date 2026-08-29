@@ -7,6 +7,7 @@ import {
   countSenders,
   insertSenders,
 } from '@outbox/db';
+import { ensureEmailsIndex } from '@outbox/search';
 
 /**
  * Boot-time provisioning, run by the compose `migrate` init container before api
@@ -66,6 +67,18 @@ async function resolveCreds(): Promise<Cred[]> {
 async function main(): Promise<void> {
   await sql`select 1`;
   await runMigrations();
+
+  // Create the Elasticsearch emails index (explicit mapping) if absent. Non-fatal
+  // like sender provisioning: a down ES must never block boot — the index worker
+  // and reindex script also ensure it, so search catches up once ES is reachable.
+  try {
+    await ensureEmailsIndex();
+    console.log('Elasticsearch emails index ready.');
+  } catch (err) {
+    console.warn(
+      `Elasticsearch index not created (${(err as Error).message}); it will be created on first index/reindex.`,
+    );
+  }
 
   if ((await countSenders()) > 0) {
     console.log('Senders already present — skipping provisioning.');

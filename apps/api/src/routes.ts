@@ -14,6 +14,7 @@ import {
   type EmailStatus,
   type CreateCampaignResponse,
   type EmailListResponse,
+  type EmailSearchResponse,
 } from '@outbox/shared';
 import {
   getUser,
@@ -21,8 +22,11 @@ import {
   listEmails,
   createCampaignWithEmails,
   deleteSlackIntegration,
+  searchEmailsPg,
+  clampPagination,
 } from '@outbox/db';
-import { enqueueEmailSends } from '@outbox/queue';
+import { enqueueEmailSends, enqueueIndexBulk } from '@outbox/queue';
+import { searchEmails } from '@outbox/search';
 import { authorizeUrl } from './slack.js';
 
 function fail(res: Response, status: number, code: string, message: string): void {
@@ -82,14 +86,10 @@ api.get('/senders', ah(async (req, res) => {
 }));
 
 api.get('/emails', ah(async (req, res) => {
-  const rawStatus = req.query.status;
-  let status: EmailStatus | undefined;
-  if (typeof rawStatus === 'string' && rawStatus !== '') {
-    if (!EMAIL_STATUSES.includes(rawStatus as EmailStatus)) {
-      fail(res, 400, 'bad_request', `Unknown status: ${rawStatus}`);
-      return;
-    }
-    status = rawStatus as EmailStatus;
+  const status = parseStatus(req.query.status);
+  if (status === 'invalid') {
+    fail(res, 400, 'bad_request', `Unknown status: ${String(req.query.status)}`);
+    return;
   }
   const page = Number(req.query.page);
   const pageSize = Number(req.query.pageSize);
@@ -99,6 +99,67 @@ api.get('/emails', ah(async (req, res) => {
     pageSize,
   });
   res.json(result);
+}));
+
+/** Parse and validate the shared status query param. Returns undefined if absent,
+ * or throws a 400-shaped sentinel string if unknown. */
+function parseStatus(raw: unknown): EmailStatus | undefined | 'invalid' {
+  if (typeof raw !== 'string' || raw === '') return undefined;
+  return EMAIL_STATUSES.includes(raw as EmailStatus)
+    ? (raw as EmailStatus)
+    : 'invalid';
+}
+
+// Full-text search over the user's emails. Elasticsearch is primary; if it's
+// unreachable we fall back to a Postgres ILIKE query and flag `degraded: true`
+// so the send path and the dashboard both survive a down ES.
+api.get('/emails/search', ah(async (req, res) => {
+  const status = parseStatus(req.query.status);
+  if (status === 'invalid') {
+    fail(res, 400, 'bad_request', `Unknown status: ${String(req.query.status)}`);
+    return;
+  }
+  const q = typeof req.query.q === 'string' ? req.query.q : undefined;
+  const fromRaw = typeof req.query.from === 'string' ? req.query.from : undefined;
+  const toRaw = typeof req.query.to === 'string' ? req.query.to : undefined;
+  for (const [name, v] of [['from', fromRaw], ['to', toRaw]] as const) {
+    if (v && Number.isNaN(Date.parse(v))) {
+      fail(res, 400, 'bad_request', `Invalid ${name} date: ${v}`);
+      return;
+    }
+  }
+  const { page, pageSize } = clampPagination({
+    page: Number(req.query.page),
+    pageSize: Number(req.query.pageSize),
+  });
+
+  const uid = userId(req);
+  try {
+    const { data, total } = await searchEmails({
+      userId: uid,
+      q,
+      status: status || undefined,
+      from: fromRaw,
+      to: toRaw,
+      page,
+      pageSize,
+    });
+    const body: EmailSearchResponse = { data, page, pageSize, total, degraded: false };
+    res.json(body);
+  } catch (err) {
+    // ES down/unreachable → degrade to Postgres rather than 500 the dashboard.
+    console.warn('search: Elasticsearch unavailable, falling back to Postgres:', err);
+    const pg = await searchEmailsPg(uid, {
+      q,
+      status: status || undefined,
+      from: fromRaw ? new Date(fromRaw) : undefined,
+      to: toRaw ? new Date(toRaw) : undefined,
+      page,
+      pageSize,
+    });
+    const body: EmailSearchResponse = { ...pg, degraded: true };
+    res.json(body);
+  }
 }));
 
 // Slack OAuth start: hand the browser an authorize URL (the SPA fetches this
@@ -136,6 +197,12 @@ api.post('/campaigns', ah(async (req, res) => {
   );
   // Enqueue only after the transaction has committed — see ARCHITECTURE §2.
   await enqueueEmailSends(emails);
+  // Index the freshly-created rows (async, via the email-index queue — never
+  // inline). A slow ES can't slow campaign creation; a failed enqueue must not
+  // fail the request, so swallow it (the boot/reindex path backfills).
+  await enqueueIndexBulk(emails.map((e) => e.id)).catch((err) =>
+    console.error('campaigns: index enqueue failed', err),
+  );
   const response: CreateCampaignResponse = { id, totalRecipients, startAt, delayMs };
   res.status(201).json(response);
 }));

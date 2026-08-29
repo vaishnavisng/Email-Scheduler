@@ -73,6 +73,69 @@ export async function closeEmailSendQueue(): Promise<void> {
   }
 }
 
+export const EMAIL_INDEX_QUEUE = 'email-index';
+
+/** Payload for an index job. Like the send queue, the row id is the only state
+ * carried in Redis; the index worker reads the row fresh from Postgres so it
+ * always indexes the current state, whatever transition triggered the enqueue. */
+export interface EmailIndexJobData {
+  emailId: string;
+}
+
+/**
+ * Indexing is best-effort background work, so keep only recent history and let
+ * BullMQ retry a down Elasticsearch (upsert-by-id makes retries harmless →
+ * at-least-once indexing). NEVER inline in the send path (CONVENTIONS.md / phase 7).
+ */
+const indexJobOptions: JobsOptions = {
+  attempts: 5,
+  backoff: { type: 'exponential', delay: 5000 },
+  removeOnComplete: { age: 3600, count: 1000 },
+  removeOnFail: { age: 86400 },
+};
+
+let indexQueue: Queue<EmailIndexJobData> | undefined;
+export function emailIndexQueue(): Queue<EmailIndexJobData> {
+  if (!indexQueue) {
+    indexQueue = new Queue<EmailIndexJobData>(EMAIL_INDEX_QUEUE, {
+      connection: createRedis(),
+      defaultJobOptions: indexJobOptions,
+    });
+  }
+  return indexQueue;
+}
+
+export async function closeEmailIndexQueue(): Promise<void> {
+  if (indexQueue) {
+    await indexQueue.close();
+    indexQueue = undefined;
+  }
+}
+
+/**
+ * Enqueue an index job for one email row. Called on campaign creation and after
+ * every status transition. No fixed jobId: each transition should re-index, and
+ * the upsert keeps duplicates harmless. Never throws into the caller — a failed
+ * enqueue must not break sending — so callers can `void` it or await defensively.
+ */
+export async function enqueueIndex(emailId: string): Promise<void> {
+  await emailIndexQueue().add('index', { emailId });
+}
+
+/** Bulk variant for campaign creation, chunked like enqueueEmailSends. */
+export async function enqueueIndexBulk(emailIds: string[]): Promise<void> {
+  if (emailIds.length === 0) return;
+  const q = emailIndexQueue();
+  for (let i = 0; i < emailIds.length; i += CHUNK) {
+    await q.addBulk(
+      emailIds.slice(i, i + CHUNK).map((id) => ({
+        name: 'index',
+        data: { emailId: id },
+      })),
+    );
+  }
+}
+
 const CHUNK = 500;
 
 export interface EmailToEnqueue {

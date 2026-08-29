@@ -101,3 +101,9 @@ export interface EmailListResponse {
   pageSize: number;
   total: number;
 }
+
+/** GET /api/emails/search — list envelope plus a flag set true when the search
+ * fell back to Postgres because Elasticsearch was unreachable. */
+export interface EmailSearchResponse extends EmailListResponse {
+  degraded: boolean;
+}
