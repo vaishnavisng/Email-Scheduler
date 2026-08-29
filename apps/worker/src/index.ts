@@ -22,6 +22,7 @@ import {
 } from '@outbox/db';
 import { pickMostQuota } from './pick.js';
 import { reconcileOnBoot } from './reconcile.js';
+import { notifyRateLimit } from './notify.js';
 
 /**
  * Worker process. Consumes email-send jobs and sends via Ethereal SMTP. The
@@ -33,14 +34,6 @@ const connection = createRedis();
 // The reserve Lua is registered once at boot (idempotent).
 const rr = createRedis();
 defineReserveSlot(rr);
-
-/** Placeholder for the sender-facing rate-limit alert. Phase 8 wires this to
- * Slack. ponytail: stub — logs only until the Slack integration lands. */
-function notifyRateLimited(emailId: string, sender: SenderRow): void {
-  console.log(
-    `rate-limit: email ${emailId} re-parked (sender ${sender.label} quota spent)`,
-  );
-}
 
 async function send(job: Job<EmailJobData>, token?: string): Promise<void> {
   const emailId = job.data.emailId;
@@ -85,7 +78,21 @@ async function send(job: Job<EmailJobData>, token?: string): Promise<void> {
       (window + 1) * env.RATE_LIMIT_WINDOW_MS +
       pending.seq * env.MIN_DELAY_BETWEEN_EMAILS_MS;
     await updateScheduledAt(emailId, new Date(next));
-    notifyRateLimited(emailId, sender);
+    const limit = sender.hourlyLimit ?? env.MAX_EMAILS_PER_HOUR_PER_SENDER;
+    // Reuse rr (the reserve client) so notify opens no extra Redis connection.
+    // notifyRateLimit never throws — a Slack failure can't fail this job.
+    await notifyRateLimit(
+      pending.userId,
+      sender.id,
+      {
+        senderLabel: sender.label,
+        limit,
+        count: used.get(sender.id) ?? limit,
+        nextWindowAt: new Date(next),
+        campaignName: pending.subject,
+      },
+      { redis: rr },
+    );
     await job.moveToDelayed(next, token);
     throw new DelayedError();
   }

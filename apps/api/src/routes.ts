@@ -20,8 +20,10 @@ import {
   listSenders,
   listEmails,
   createCampaignWithEmails,
+  deleteSlackIntegration,
 } from '@outbox/db';
 import { enqueueEmailSends } from '@outbox/queue';
+import { authorizeUrl } from './slack.js';
 
 function fail(res: Response, status: number, code: string, message: string): void {
   const body: ApiError = { error: { code, message } };
@@ -97,6 +99,21 @@ api.get('/emails', ah(async (req, res) => {
     pageSize,
   });
   res.json(result);
+}));
+
+// Slack OAuth start: hand the browser an authorize URL (the SPA fetches this
+// with its Bearer token, then redirects). The public callback lives in slack.ts.
+api.get('/slack/connect', (req, res) => {
+  if (!env.SLACK_CLIENT_ID) {
+    fail(res, 503, 'slack_not_configured', 'Slack OAuth is not configured.');
+    return;
+  }
+  res.json({ url: authorizeUrl(userId(req)) });
+});
+
+api.post('/slack/disconnect', ah(async (req, res) => {
+  await deleteSlackIntegration(userId(req));
+  res.status(204).end();
 }));
 
 api.post('/campaigns', ah(async (req, res) => {
