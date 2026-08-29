@@ -35,12 +35,17 @@ const schema = z.object({
     .string()
     .default('http://localhost:4000/api/auth/google/callback'),
 
-  // Slack OAuth — filled in during Phase 8, optional until then.
+  // Slack OAuth (incoming-webhook scope). Client id/secret committed to this
+  // private repo in .env.example so reviewers can Connect Slack without making
+  // their own app. Optional: blank → the connect endpoint 503s, worker no-ops.
   SLACK_CLIENT_ID: z.string().default(''),
   SLACK_CLIENT_SECRET: z.string().default(''),
   SLACK_REDIRECT_URI: z
     .string()
     .default('http://localhost:4000/api/slack/callback'),
+
+  // Where the Slack callback sends the browser once connected.
+  WEB_URL: z.string().default('http://localhost:3000'),
 
   // Auth + Bull Board.
   JWT_SECRET: z.string().min(1).default('dev-insecure-jwt-secret-change-me'),

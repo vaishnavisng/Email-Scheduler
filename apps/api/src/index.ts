@@ -12,6 +12,7 @@ import { env, type HealthResponse, type ApiError } from '@outbox/shared';
 import { pingDb } from '@outbox/db';
 import { createRedis, pingRedis, emailSendQueue } from '@outbox/queue';
 import { api } from './routes.js';
+import { slackCallbackRouter } from './slack.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -75,6 +76,10 @@ app.use(
   }),
   bullBoard.getRouter(),
 );
+
+// Public Slack OAuth callback — Slack redirects the browser here with no auth
+// header, so it must sit BEFORE the Bearer-guarded /api router.
+app.use('/api/slack', slackCallbackRouter);
 
 app.use('/api', api);
 

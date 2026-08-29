@@ -236,17 +236,43 @@ flag, and that search is always filtered by the authenticated user.>
 
 ## 9. Slack integration
 
-<OAuth v2 with the incoming-webhook scope, token stored per user. The three
-behaviours the spec calls for:>
+OAuth v2 with the `incoming-webhook` scope; the webhook URL, team name and
+channel are stored per user in `slack_integrations` (`UNIQUE(user_id)`, so
+reconnecting replaces rather than duplicates). See
+`docs/DECISIONS/0007-slack.md`.
 
-- **Not connected** → <silent no-op, no crash.>
-- **Connected later** → <works with no redeploy, because the webhook is read from
-  the DB on every call rather than cached at boot.>
-- **Many rate-limited jobs** → <one message, not hundreds: dedupe via
-  `SET slack:notified:{userId}:{senderId}:{window} NX EX <window>`.>
+**OAuth flow** (`apps/api/src/slack.ts`):
 
-<Also: the whole call is wrapped in try/catch, so a dead webhook can never fail an
-email job.>
+- `GET /api/slack/connect` (Bearer-authed) returns `{ url }` — a Slack authorize
+  URL whose `state` is a **signed, 10-minute HS256 JWT carrying the user id**
+  (`packages/shared/jwt.ts`, the same primitive as the session token). The SPA
+  fetches this and redirects the browser to it. Returning JSON rather than a 302
+  is deliberate: identity arrives as a Bearer header, which a top-level browser
+  navigation can't carry.
+- `GET /api/slack/callback` is **public** — Slack redirects the browser here with
+  no auth header, so it's mounted before the `/api` guard. It verifies the state
+  to recover the user id (no session store needed), exchanges the code at
+  `oauth.v2.access`, persists the integration, and 302s back to
+  `${WEB_URL}/?slack=connected` (`denied`/`error` otherwise).
+- `POST /api/slack/disconnect` (authed) deletes the row.
+
+**Rate-limit notification** (`notifyRateLimit`, `apps/worker/src/notify.ts`),
+called from the worker's QUOTA re-park branch. The three behaviours the spec
+calls for:
+
+- **Not connected** → `getSlackIntegration` returns null and the function returns
+  silently — no crash, no error-level log.
+- **Connected later** → works with no redeploy, because the integration is read
+  from the DB on *every* call, never cached at boot.
+- **Many rate-limited jobs** → one message per window, not hundreds:
+  `SET slack:notified:{userId}:{senderId}:{window} NX EX <window>` claims the
+  right to notify; a null reply (key already set) short-circuits. So 400 re-parked
+  jobs for the same sender/window produce exactly one Block Kit message (sender
+  label, hourly limit, count, resume time, campaign name).
+
+The whole body is wrapped in try/catch, so a dead or slow webhook can never fail
+an email job. `notifyRateLimit` reuses the worker's reserve Redis client and is
+awaited before `moveToDelayed` — it's guaranteed not to throw.
 
 ---
 

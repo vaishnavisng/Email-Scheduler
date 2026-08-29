@@ -30,6 +30,13 @@ export {
 } from './emails.js';
 export { ensureUser, getUser } from './users.js';
 export {
+  getSlackIntegration,
+  upsertSlackIntegration,
+  deleteSlackIntegration,
+  type SlackIntegrationRow,
+  type SlackIntegrationInput,
+} from './slack.js';
+export {
   listSenders,
   getActiveSenders,
   countSenders,

@@ -135,13 +135,25 @@ export async function claimForSending(id: string): Promise<EmailRow | null> {
 }
 
 /** Minimal read for the rate-limiter path, which runs BEFORE the row is claimed:
- * it needs `seq` (quota re-park ordering offset) without pulling the whole row.
- * Null = row is gone. */
+ * `seq` drives the quota re-park ordering offset; `userId`/`subject` feed the
+ * Slack rate-limit notification (owner + campaign name). Null = row is gone. */
 export async function getEmailForSchedule(
   id: string,
-): Promise<{ id: string; seq: number; status: EmailStatus } | null> {
+): Promise<{
+  id: string;
+  seq: number;
+  status: EmailStatus;
+  userId: string;
+  subject: string;
+} | null> {
   const [row] = await db
-    .select({ id: emails.id, seq: emails.seq, status: emails.status })
+    .select({
+      id: emails.id,
+      seq: emails.seq,
+      status: emails.status,
+      userId: emails.userId,
+      subject: emails.subject,
+    })
     .from(emails)
     .where(eq(emails.id, id));
   return row ?? null;
