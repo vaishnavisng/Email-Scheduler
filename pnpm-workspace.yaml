@@ -1,0 +1,12 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Native postinstall builds are blocked by default; allow only these known-safe
+# deps. esbuild powers tsx/vitest; msgpackr-extract is a bullmq transitive.
+allowBuilds:
+  esbuild: true
+  msgpackr-extract: true
+onlyBuiltDependencies:
+  - esbuild
+  - msgpackr-extract
