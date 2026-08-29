@@ -177,28 +177,35 @@ hardcoded.
 | `MAX_EMAILS_PER_HOUR_GLOBAL` | 1000 | Optional global cap |
 | `RATE_LIMIT_WINDOW_MS` | 3600000 | Window length; shortened in `.env.demo` |
 
-**Why a Lua script** (`packages/queue/rate-limit.lua`): <GET → decide → INCR is a
+**Why a Lua script** (`packages/queue/rate-limit.lua`): GET → decide → INCR is a
 read-modify-write race across workers. A single EVAL makes check-and-reserve
 atomic, since Redis executes scripts serially. Registered via `defineCommand` so
-it's cached by SHA rather than re-sent per call.>
+it's cached by SHA rather than re-sent per call. See
+`docs/DECISIONS/0006-rate-limiting.md`.
 
 **Keys:** `throttle:{senderId}` holds the last send timestamp;
-`quota:{senderId}:{window}` is a counter with a TTL of twice the window, where
-`window = floor(now / RATE_LIMIT_WINDOW_MS)`.
+`quota:{senderId}:{window}` counts per-sender sends this window and
+`quota:global:{window}` the global total, both with a TTL of twice the window,
+where `window = floor(now / RATE_LIMIT_WINDOW_MS)`. The script checks quota (and
+the optional global cap) then the throttle gate, and increments the counters only
+if both pass.
 
-**Why `moveToDelayed` rather than throwing:** <a thrown error consumes a retry
+**Why `moveToDelayed` rather than throwing:** a thrown error consumes a retry
 attempt and eventually marks the job failed, but the spec requires rate-limited
 jobs are never dropped or permanently failed. `job.moveToDelayed()` followed by
-`DelayedError` re-parks the job without touching the attempt count.>
+`DelayedError` re-parks the job without touching the attempt count. THROTTLE
+re-parks by the returned `waitMs`; QUOTA re-parks to the next window.
 
-**Order preservation:** <rescheduled jobs get `seq * MIN_DELAY_BETWEEN_EMAILS_MS`
-as an offset into the next window. State honestly that this is approximate —
-BullMQ gives no cross-worker ordering guarantee for jobs due in the same
-millisecond.>
+**Order preservation:** rescheduled jobs get `seq * MIN_DELAY_BETWEEN_EMAILS_MS`
+as an offset into the next window, and their `scheduled_at` is persisted so the
+boot reconciler agrees. This is approximate — BullMQ gives no cross-worker
+ordering guarantee for jobs due in the same millisecond.
 
-**Sender selection:** <quota-aware — pick the active sender with the most
-remaining quota this window, so a large campaign spreads across senders instead of
-exhausting the first.>
+**Sender selection:** quota-aware — an MGET of the per-sender counters, then pick
+the active sender with the most remaining quota this window, so a large campaign
+spreads across senders instead of exhausting the first. The slot is reserved
+before the row is claimed, so a claim that no-ops (another worker already sending)
+leaves the slot counted — accounting is approximate, never over-permissive.
 
 ---
 

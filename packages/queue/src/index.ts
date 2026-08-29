@@ -2,6 +2,16 @@ import { Redis } from 'ioredis';
 import { Queue, type JobsOptions } from 'bullmq';
 import { env } from '@outbox/shared';
 
+export {
+  defineReserveSlot,
+  reserveSlot,
+  readUsed,
+  windowFor,
+  type RateReason,
+  type Reservation,
+  type ReserveOptions,
+} from './rate-limit.js';
+
 /**
  * Shared Redis connection factory. BullMQ requires maxRetriesPerRequest: null
  * on the connection it blocks on.
