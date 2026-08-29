@@ -134,6 +134,30 @@ export async function claimForSending(id: string): Promise<EmailRow | null> {
   return row ?? null;
 }
 
+/** Minimal read for the rate-limiter path, which runs BEFORE the row is claimed:
+ * it needs `seq` (quota re-park ordering offset) without pulling the whole row.
+ * Null = row is gone. */
+export async function getEmailForSchedule(
+  id: string,
+): Promise<{ id: string; seq: number; status: EmailStatus } | null> {
+  const [row] = await db
+    .select({ id: emails.id, seq: emails.seq, status: emails.status })
+    .from(emails)
+    .where(eq(emails.id, id));
+  return row ?? null;
+}
+
+/** Push a rate-limited row's scheduled_at to its next-window fire time. Guarded
+ * to pending states so it can never disturb a row that's mid-send or done. */
+export async function updateScheduledAt(id: string, when: Date): Promise<void> {
+  await db
+    .update(emails)
+    .set({ scheduledAt: when, updatedAt: new Date() })
+    .where(
+      and(eq(emails.id, id), inArray(emails.status, ['scheduled', 'queued'])),
+    );
+}
+
 export async function markSent(
   id: string,
   data: { senderId: string; messageId: string | null; previewUrl: string | null },

@@ -23,6 +23,8 @@ export {
   resetForRetry,
   getReconcilable,
   resetStalledSends,
+  getEmailForSchedule,
+  updateScheduledAt,
   type CreateCampaignInput,
   type EmailRow,
 } from './emails.js';
