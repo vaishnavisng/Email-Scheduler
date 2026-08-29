@@ -39,12 +39,23 @@ export const EMAIL_STATUSES: readonly EmailStatus[] = [
   'cancelled',
 ];
 
-/** GET /api/me — the authenticated user. */
+/** The authenticated user row. */
 export interface Me {
   id: string;
   email: string;
   name: string;
   avatarUrl: string | null;
+}
+
+/** The user's Slack integration summary, surfaced in the header. */
+export interface SlackStatus {
+  teamName: string;
+  channel: string;
+}
+
+/** GET /api/me — the user plus their Slack connect state (null = not connected). */
+export interface MeResponse extends Me {
+  slack: SlackStatus | null;
 }
 
 /** GET /api/senders — one row. Secrets (smtpPass) are never serialized. */

@@ -12,12 +12,14 @@ import {
   EMAIL_STATUSES,
   type ApiError,
   type EmailStatus,
+  type MeResponse,
   type CreateCampaignResponse,
   type EmailListResponse,
   type EmailSearchResponse,
 } from '@outbox/shared';
 import {
   getUser,
+  getSlackIntegration,
   listSenders,
   listEmails,
   createCampaignWithEmails,
@@ -28,6 +30,7 @@ import {
 import { enqueueEmailSends, enqueueIndexBulk } from '@outbox/queue';
 import { searchEmails } from '@outbox/search';
 import { authorizeUrl } from './slack.js';
+import { sessionTokenFromRequest } from './auth.js';
 
 function fail(res: Response, status: number, code: string, message: string): void {
   const body: ApiError = { error: { code, message } };
@@ -41,10 +44,10 @@ const ah =
     fn(req, res).catch(next);
   };
 
-/** Verifies the Bearer JWT and pins req.userId. Phase 6's OAuth issues the token. */
+/** Verifies the session JWT (httpOnly cookie, or Bearer for scripts) and pins
+ * req.userId. The Google OAuth callback in auth.ts issues the token. */
 function requireAuth(req: Request, res: Response, next: NextFunction): void {
-  const header = req.header('authorization') ?? '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+  const token = sessionTokenFromRequest(req);
   const claims = token ? verifyJwt(token, env.JWT_SECRET) : null;
   if (!claims) {
     fail(res, 401, 'unauthorized', 'Missing or invalid authentication token.');
@@ -73,12 +76,18 @@ export const api: IRouter = Router();
 api.use(requireAuth);
 
 api.get('/me', ah(async (req, res) => {
-  const me = await getUser(userId(req));
+  const uid = userId(req);
+  const me = await getUser(uid);
   if (!me) {
     fail(res, 404, 'not_found', 'User not found.');
     return;
   }
-  res.json(me);
+  const slack = await getSlackIntegration(uid);
+  const body: MeResponse = {
+    ...me,
+    slack: slack ? { teamName: slack.teamName, channel: slack.channel } : null,
+  };
+  res.json(body);
 }));
 
 api.get('/senders', ah(async (req, res) => {

@@ -96,6 +96,16 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-insecure-jwt-secret-change-me}
       BULLBOARD_USER: ${BULLBOARD_USER:-admin}
       BULLBOARD_PASS: ${BULLBOARD_PASS:-admin}
+      # Browser-facing origin (OAuth redirect target). localhost is correct here.
+      WEB_URL: ${WEB_URL:-http://localhost:3000}
+      # Google OAuth — paste creds into .env; the API runs the whole flow.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL:-http://localhost:4000/api/auth/google/callback}
+      # Slack OAuth (incoming-webhook) — blank → Connect returns 503, handled in UI.
+      SLACK_CLIENT_ID: ${SLACK_CLIENT_ID:-}
+      SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET:-}
+      SLACK_REDIRECT_URI: ${SLACK_REDIRECT_URI:-http://localhost:4000/api/slack/callback}
     ports:
       - '${API_PORT:-4000}:4000'
     depends_on:

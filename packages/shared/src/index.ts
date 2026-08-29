@@ -7,6 +7,8 @@ export {
   type ApiError,
   type EmailStatus,
   type Me,
+  type SlackStatus,
+  type MeResponse,
   type Sender,
   type CreateCampaignRequest,
   type CreateCampaignResponse,

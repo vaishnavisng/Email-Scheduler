@@ -3,6 +3,7 @@ import express, {
   type Response,
   type NextFunction,
 } from 'express';
+import cors from 'cors';
 import basicAuth from 'express-basic-auth';
 import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
@@ -18,9 +19,13 @@ import {
 } from '@outbox/queue';
 import { api } from './routes.js';
 import { slackCallbackRouter } from './slack.js';
+import { authRouter } from './auth.js';
 
 const app = express();
 app.disable('x-powered-by');
+// The web app is a separate origin (:3000) sending the session cookie, so CORS
+// must echo that specific origin and allow credentials (never `*` with creds).
+app.use(cors({ origin: env.WEB_URL, credentials: true }));
 app.use(express.json());
 
 const redis = createRedis();
@@ -84,6 +89,10 @@ app.use(
   }),
   bullBoard.getRouter(),
 );
+
+// Public auth routes (Google redirects the browser here with no session cookie
+// yet) — must sit BEFORE the guarded /api router.
+app.use('/api/auth', authRouter);
 
 // Public Slack OAuth callback — Slack redirects the browser here with no auth
 // header, so it must sit BEFORE the Bearer-guarded /api router.
