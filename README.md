@@ -43,10 +43,9 @@ pnpm load-test
 pnpm smoke-test
 ```
 
-> **Google login works out of the box** — the client credentials are committed to
-> `.env.example` for evaluation convenience (private repo; rotated after eval).
-> **Slack** OAuth needs a Slack app's client id/secret added to `.env` (blank by
-> default); until then "Connect Slack" is disabled and everything else runs normally.
+> **Google login and Slack Connect both work out of the box** — the client
+> credentials are committed to `.env.example` for evaluation convenience (private
+> repo; rotated after eval). Nothing to configure.
 
 ---
 
@@ -91,7 +90,7 @@ Compose overrides the service URLs with container names internally.
 | `JWT_SECRET` | `dev-insecure-…` | Signs the session + Slack-state JWTs |
 | `BULLBOARD_USER` / `BULLBOARD_PASS` | admin / admin | Bull Board basic auth |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_CALLBACK_URL` | committed | Google OAuth login (shared for eval; rotated after) |
-| `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` / `SLACK_REDIRECT_URI` | blank | Slack OAuth (incoming-webhook) — add a Slack app's creds to enable |
+| `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` / `SLACK_REDIRECT_URI` | committed | Slack OAuth (incoming-webhook) — shared for eval; rotated after |
 | `NEXT_PUBLIC_API_URL` / `WEB_URL` | localhost:4000 / :3000 | Browser-facing URLs |
 
 A tiny-window demo profile lives in `.env.demo` (window 120s, 5/sender) so the
@@ -196,11 +195,10 @@ and unit tests, then brings up the compose stack and runs the smoke test.
 ## Trade-offs, assumptions & shortcuts
 
 - **OAuth credentials are shared in this private repo for evaluation
-  convenience and will be rotated after evaluation.** The Google client
-  id/secret are committed to `.env.example` so reviewers get working login on a
-  fresh clone (the repo is private). Slack's are left blank — enable Slack by
-  adding a Slack app's client id/secret to `.env`. All shared creds will be
-  rotated once evaluation is complete.
+  convenience and will be rotated after evaluation.** Both the Google and Slack
+  client id/secret are committed to `.env.example` so reviewers get working login
+  and Slack Connect on a fresh clone (the repo is private). All shared creds will
+  be rotated once evaluation is complete.
 - **Sender SMTP credentials are stored unencrypted** in Postgres. Production would
   wrap them with a KMS (see ARCHITECTURE §12).
 - **Elasticsearch runs single-node with security disabled** — local/dev only.
