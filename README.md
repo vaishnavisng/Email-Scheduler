@@ -49,20 +49,94 @@ pnpm smoke-test
 
 ---
 
-## Running pieces individually (optional)
+## Running backend & frontend locally (without Docker)
 
-Docker is the supported path. To run an app on the host instead, the backing
-services still come from Docker and `.env` already points at `localhost`:
+If you'd rather run the app processes on your host (hot-reload, debugging), the
+backing services (Postgres, Redis, Elasticsearch) still come from Docker, and
+`.env` already points them at `localhost`.
+
+**Prerequisites:** Node ≥ 20, [pnpm](https://pnpm.io) 11, and Docker (for the
+three backing services only).
+
+**1. Install deps and env file**
 
 ```bash
-docker compose up -d postgres redis elasticsearch   # backing services
 pnpm install
-pnpm --filter @outbox/db migrate                     # run migrations
-pnpm bootstrap                                        # seed senders + ES index
-pnpm --filter @outbox/api dev                         # Express API + Bull Board (:4000)
-pnpm --filter @outbox/worker dev                      # BullMQ worker (send + index)
-pnpm --filter @outbox/web dev                         # Next.js dashboard (:3000)
+cp .env.example .env
 ```
+
+**2. Start the backing services** (Postgres, Redis, Elasticsearch)
+
+```bash
+docker compose up -d postgres redis elasticsearch
+```
+
+**3. Migrate the DB + seed Ethereal senders + create the ES index** (one command)
+
+```bash
+pnpm bootstrap
+```
+
+### Backend
+
+The backend is **two processes** — run each in its own terminal:
+
+```bash
+# Terminal A — Express REST API + Bull Board dashboard  (http://localhost:4000)
+pnpm --filter @outbox/api dev
+
+# Terminal B — BullMQ worker: sends emails + indexes them into Elasticsearch
+pnpm --filter @outbox/worker dev
+```
+
+- **API** (`:4000`) serves the REST endpoints, Google/Slack OAuth callbacks, and
+  Bull Board at `/admin/queues`. It's stateless — restarting it never touches the
+  schedule.
+- **Worker** consumes delayed jobs from Redis, enforces the rate limit, sends via
+  Ethereal SMTP, then indexes into Elasticsearch (both the send worker and the
+  index worker run inside this single process).
+
+### Frontend
+
+```bash
+# Terminal C — Next.js dashboard  (http://localhost:3000)
+pnpm --filter @outbox/web dev
+```
+
+Open **http://localhost:3000**, sign in with Google, and you're on the dashboard.
+
+> **Shortcut:** `pnpm dev` from the repo root runs the API, worker, and web
+> together in parallel (after steps 1–3 above).
+
+---
+
+## Running the whole app (Docker — recommended)
+
+The one-command path in [Evaluation quickstart](#evaluation-quickstart) above
+(`docker compose up --build`) boots everything — Postgres, Redis, Elasticsearch,
+the API, the worker, and the web dashboard — with migrations and seeding handled
+by the `migrate` init container. Nothing else to configure.
+
+---
+
+## Testing
+
+```bash
+pnpm typecheck   # TypeScript across all packages
+pnpm lint        # ESLint
+pnpm test        # Vitest unit tests (infra-dependent tests skip without services)
+```
+
+**Against a running stack** (start it with Docker or the local path above):
+
+```bash
+pnpm smoke-test                   # end-to-end: create a campaign → poll until sent → assert searchable
+pnpm load-test                    # enqueue 1200 jobs at the same instant; prints the drain (watch Bull Board)
+pnpm tsx scripts/demo-restart.ts  # restart-safety drill: schedule, restart api+worker, confirm nothing is lost
+```
+
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs typecheck, lint,
+and unit tests, then brings up the compose stack and runs the smoke test.
 
 ---
 
@@ -181,22 +255,6 @@ Line references are to [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md).
 Beyond the spec: server pagination, live `refetchInterval` so rows migrate
 Scheduled→Sent without a refresh, and a Postgres `ILIKE` fallback when
 Elasticsearch is unreachable (`degraded: true`).
-
----
-
-## Verification
-
-```bash
-pnpm typecheck   # all packages
-pnpm lint        # eslint
-pnpm test        # vitest — unit tests (infra-dependent tests skip without services)
-pnpm smoke-test  # end-to-end against a running stack (used by CI)
-pnpm load-test   # 1200 jobs, same instant — prints the drain, screenshot Bull Board
-pnpm tsx scripts/demo-restart.ts   # restart-safety drill (schedules, then restart api+worker)
-```
-
-CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs typecheck, lint
-and unit tests, then brings up the compose stack and runs the smoke test.
 
 ---
 
