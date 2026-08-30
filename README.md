@@ -94,8 +94,12 @@ Compose overrides the service URLs with container names internally.
 | `NEXT_PUBLIC_API_URL` / `WEB_URL` | localhost:4000 / :3000 | Browser-facing URLs |
 
 A tiny-window demo profile lives in `.env.demo` (window 120s, 5/sender) so the
-rate limiter and Slack alert are observable in a short live demo:
-`docker compose --env-file .env.demo up`.
+rate limiter and Slack alert are observable in a short live demo. Pass **both**
+env files — `.env` first for the base config (DB URLs, OAuth creds), then
+`.env.demo` to override the two rate-limit values (Compose applies them in order,
+last wins; a single `--env-file .env.demo` would drop the OAuth creds and break
+login):
+`docker compose --env-file .env --env-file .env.demo up`.
 
 ### Ethereal setup
 
@@ -123,13 +127,17 @@ rate-limit state) and Elasticsearch (search index):
 Redis sorted set — no cron anywhere. **Persistence:** Postgres holds the truth,
 Redis is AOF-persisted, and a boot reconciler rebuilds the schedule from Postgres
 after any restart under deterministic job IDs, so nothing is lost or duplicated.
+**Concurrency** is BullMQ worker concurrency (`WORKER_CONCURRENCY`, default 5):
+each worker pulls at most that many jobs in parallel, and every send passes through
+an atomic `claimForSending` (single SQL `UPDATE … WHERE status='scheduled'`), so
+two workers can never send the same email — safe to scale workers horizontally.
 **Rate limiting** is a single Redis Lua script (check-and-reserve, atomic across
 workers); over-quota jobs `moveToDelayed` into the next window rather than failing,
 and fire one Slack alert per sender per window.
 
 📖 **Full detail — read this for the review:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-(scheduling §3, persistence §4, idempotency §5, rate limiting §6, behaviour under
-load §7). Design decisions are logged in [`docs/DECISIONS/`](docs/DECISIONS).
+(scheduling §3, persistence §4, idempotency §5, concurrency + rate limiting §6,
+behaviour under load §7). Design decisions are logged in [`docs/DECISIONS/`](docs/DECISIONS).
 
 ---
 
