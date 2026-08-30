@@ -280,7 +280,7 @@ Elasticsearch is unreachable (`degraded: true`).
 
 ## Demo video
 
-**▶ [Watch the demo (≤5 min)](https://drive.google.com/file/d/1bGkxoYdddcW5ty6JYH39n1a1gKyIZp5u/view?usp=sharing)**
+**▶ [Watch the demo](https://drive.google.com/file/d/1bGkxoYdddcW5ty6JYH39n1a1gKyIZp5u/view?usp=sharing)**
 
 Walkthrough: Google login, compose + schedule from the UI, Scheduled→Sent live,
 the restart scenario (stop → start → future emails still send), and
