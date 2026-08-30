@@ -282,6 +282,8 @@ Elasticsearch is unreachable (`degraded: true`).
 
 **▶ [Watch the demo](https://drive.google.com/file/d/1bGkxoYdddcW5ty6JYH39n1a1gKyIZp5u/view?usp=sharing)**
 
+https://drive.google.com/file/d/1bGkxoYdddcW5ty6JYH39n1a1gKyIZp5u/view?usp=sharing
+
 Walkthrough: Google login, compose + schedule from the UI, Scheduled→Sent live,
 the restart scenario (stop → start → future emails still send), and
 rate-limit/delay behaviour under load.
